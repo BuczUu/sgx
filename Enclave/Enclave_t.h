@@ -33,6 +33,7 @@ sgx_status_t kx_encrypt_server(uint32_t client_id, const uint32_t* plaintext, ui
 sgx_status_t kx_decrypt_server(uint32_t client_id, const uint8_t* ciphertext, uint32_t cipher_size, const uint8_t* iv, const uint8_t* gcm_tag, uint32_t* plaintext, uint32_t plain_max, uint32_t* plain_count);
 sgx_status_t ecall_echo(uint32_t client_id, const uint8_t* input_data, uint32_t input_size, uint8_t* output_data, uint32_t* output_size);
 sgx_status_t ecall_receiver_request(uint32_t client_id, uint8_t* response_data, uint32_t* response_size);
+sgx_status_t ecall_register_data_server(const char* server_id);
 sgx_status_t sgx_ra_get_ga(sgx_ra_context_t context, sgx_ec256_public_t* g_a);
 sgx_status_t sgx_ra_proc_msg2_trusted(sgx_ra_context_t context, const sgx_ra_msg2_t* p_msg2, const sgx_target_info_t* p_qe_target, sgx_report_t* p_report, sgx_quote_nonce_t* p_nonce);
 sgx_status_t sgx_ra_get_msg3_trusted(sgx_ra_context_t context, uint32_t quote_size, sgx_report_t* qe_report, sgx_ra_msg3_t* p_msg3, uint32_t msg3_size);

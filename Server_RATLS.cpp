@@ -302,6 +302,15 @@ void *client_handler(void *arg)
     {
         add_client_connection(client_id_str, ssl);
         LOG_PRINTF("[SERVER] Data server '%s' registered (TLS)\n", client_id_str);
+
+        // Register server in Enclave
+        sgx_status_t enclave_ret;
+        status = ecall_register_data_server(global_eid, &enclave_ret, client_id_str);
+        if (status != SGX_SUCCESS || enclave_ret != SGX_SUCCESS)
+        {
+            LOG_PRINTF("[SERVER] Failed to register in Enclave: 0x%x / 0x%x\n", status, enclave_ret);
+        }
+
         // keep connection alive for OCALL use
         while (1)
         {

@@ -15,6 +15,12 @@ static uint32_t client2_set[10] = {0};
 static uint32_t client2_size = 0;
 static uint32_t clients_registered = 0;
 
+/* Lista dynamicznie zarejestrowanych data servers */
+#define MAX_DATA_SERVERS 64
+#define MAX_SERVER_ID_LEN 64
+static char g_data_servers[MAX_DATA_SERVERS][MAX_SERVER_ID_LEN] = {0};
+static uint32_t g_data_server_count = 0;
+
 /* Stan ECDH per klient */
 static sgx_ecc_state_handle_t g_ecc_ctx[2] = {0, 0};
 static sgx_ec256_private_t g_srv_priv[2];
@@ -505,77 +511,85 @@ sgx_status_t ecall_echo(uint32_t client_id,
     return SGX_SUCCESS;
 }
 
-/* Receiver request: fetch data from 2 external servers and aggregate */
+/* Register a data server */
+sgx_status_t ecall_register_data_server(const char *server_id)
+{
+    if (!server_id || g_data_server_count >= MAX_DATA_SERVERS)
+    {
+        printf("[ENCLAVE] Cannot register server: invalid param or max reached\n");
+        return SGX_ERROR_INVALID_PARAMETER;
+    }
+
+    strncpy(g_data_servers[g_data_server_count], server_id, MAX_SERVER_ID_LEN - 1);
+    g_data_servers[g_data_server_count][MAX_SERVER_ID_LEN - 1] = '\0';
+    printf("[ENCLAVE] Registered data server: %s (total=%u)\n", server_id, g_data_server_count + 1);
+    g_data_server_count++;
+    return SGX_SUCCESS;
+}
+
+/* Receiver request: fetch data from all registered servers and aggregate */
 sgx_status_t ecall_receiver_request(uint32_t client_id,
                                     uint8_t *response_data,
                                     uint32_t *response_size)
 {
     printf("[ENCLAVE] Receiver request from client %u\n", client_id);
+    printf("[ENCLAVE] Found %u registered data servers\n", g_data_server_count);
 
-    uint8_t buffer1[2048] = {0};
-    uint8_t buffer2[2048] = {0};
-    uint32_t size1 = 0, size2 = 0;
     const char *req = "GET_DATA";
     uint8_t dummy_iv[12] = {0};
     uint8_t dummy_tag[16] = {0};
     int ocall_ret = 0;
 
-    printf("[ENCLAVE] Calling OCALL send to SERVER:1...\n");
-    sgx_status_t status = ocall_send_encrypted(&ocall_ret, "SERVER:1", (const uint8_t *)req, (uint32_t)strlen(req), dummy_iv, dummy_tag);
-    if (status != SGX_SUCCESS || ocall_ret != 0)
+    if (g_data_server_count == 0)
     {
-        printf("[ENCLAVE] Failed to send to server 1: ocall=0x%x, ret=%d\n", status, ocall_ret);
-        return SGX_ERROR_UNEXPECTED;
+        printf("[ENCLAVE] No data servers registered\n");
+        *response_size = 0;
+        return SGX_SUCCESS;
     }
 
-    status = ocall_recv_encrypted(&ocall_ret, "SERVER:1", buffer1, sizeof(buffer1), dummy_iv, dummy_tag, &size1);
-    if (status != SGX_SUCCESS || ocall_ret != 0)
-    {
-        printf("[ENCLAVE] Failed to receive from server 1: ocall=0x%x, ret=%d\n", status, ocall_ret);
-        return SGX_ERROR_UNEXPECTED;
-    }
-    printf("[ENCLAVE] Received %u bytes from server 1\n", size1);
-
-    printf("[ENCLAVE] Calling OCALL send to SERVER:2...\n");
-    status = ocall_send_encrypted(&ocall_ret, "SERVER:2", (const uint8_t *)req, (uint32_t)strlen(req), dummy_iv, dummy_tag);
-    if (status != SGX_SUCCESS || ocall_ret != 0)
-    {
-        printf("[ENCLAVE] Failed to send to server 2: ocall=0x%x, ret=%d\n", status, ocall_ret);
-        return SGX_ERROR_UNEXPECTED;
-    }
-
-    status = ocall_recv_encrypted(&ocall_ret, "SERVER:2", buffer2, sizeof(buffer2), dummy_iv, dummy_tag, &size2);
-    if (status != SGX_SUCCESS || ocall_ret != 0)
-    {
-        printf("[ENCLAVE] Failed to receive from server 2: ocall=0x%x, ret=%d\n", status, ocall_ret);
-        return SGX_ERROR_UNEXPECTED;
-    }
-    printf("[ENCLAVE] Received %u bytes from server 2\n", size2);
-
-    // Aggregate: concatenate both responses with separator
+    // Aggregate data from all registered servers
     uint32_t offset = 0;
-
-    // Add server 1 data
-    if (size1 > 0 && offset + size1 < 4096)
-    {
-        memcpy(response_data + offset, buffer1, size1);
-        offset += size1;
-    }
-
-    // Add separator
     const char *separator = " + ";
     uint32_t sep_len = strlen(separator);
-    if (offset + sep_len < 4096)
-    {
-        memcpy(response_data + offset, separator, sep_len);
-        offset += sep_len;
-    }
 
-    // Add server 2 data
-    if (size2 > 0 && offset + size2 < 4096)
+    for (uint32_t i = 0; i < g_data_server_count; i++)
     {
-        memcpy(response_data + offset, buffer2, size2);
-        offset += size2;
+        char *server_id = g_data_servers[i];
+        printf("[ENCLAVE] Querying server: %s\n", server_id);
+
+        // Send request to this server
+        sgx_status_t status = ocall_send_encrypted(&ocall_ret, server_id, (const uint8_t *)req, (uint32_t)strlen(req), dummy_iv, dummy_tag);
+        if (status != SGX_SUCCESS || ocall_ret != 0)
+        {
+            printf("[ENCLAVE] Failed to send to %s: ocall=0x%x, ret=%d\n", server_id, status, ocall_ret);
+            continue;
+        }
+
+        // Receive response from this server
+        uint8_t buffer[2048] = {0};
+        uint32_t received_size = 0;
+        status = ocall_recv_encrypted(&ocall_ret, server_id, buffer, sizeof(buffer), dummy_iv, dummy_tag, &received_size);
+        if (status != SGX_SUCCESS || ocall_ret != 0)
+        {
+            printf("[ENCLAVE] Failed to receive from %s: ocall=0x%x, ret=%d\n", server_id, status, ocall_ret);
+            continue;
+        }
+
+        printf("[ENCLAVE] Received %u bytes from %s\n", received_size, server_id);
+
+        // Add separator (except before first server)
+        if (i > 0 && offset + sep_len < 4096)
+        {
+            memcpy(response_data + offset, separator, sep_len);
+            offset += sep_len;
+        }
+
+        // Add server data
+        if (received_size > 0 && offset + received_size < 4096)
+        {
+            memcpy(response_data + offset, buffer, received_size);
+            offset += received_size;
+        }
     }
 
     *response_size = offset;

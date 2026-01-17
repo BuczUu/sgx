@@ -151,6 +151,12 @@ typedef struct ms_ecall_receiver_request_t {
 	uint32_t* ms_response_size;
 } ms_ecall_receiver_request_t;
 
+typedef struct ms_ecall_register_data_server_t {
+	sgx_status_t ms_retval;
+	const char* ms_server_id;
+	size_t ms_server_id_len;
+} ms_ecall_register_data_server_t;
+
 typedef struct ms_sgx_ra_get_ga_t {
 	sgx_status_t ms_retval;
 	sgx_ra_context_t ms_context;
@@ -1577,6 +1583,61 @@ err:
 	return status;
 }
 
+static sgx_status_t SGX_CDECL sgx_ecall_register_data_server(void* pms)
+{
+	CHECK_REF_POINTER(pms, sizeof(ms_ecall_register_data_server_t));
+	//
+	// fence after pointer checks
+	//
+	sgx_lfence();
+	ms_ecall_register_data_server_t* ms = SGX_CAST(ms_ecall_register_data_server_t*, pms);
+	ms_ecall_register_data_server_t __in_ms;
+	if (memcpy_s(&__in_ms, sizeof(ms_ecall_register_data_server_t), ms, sizeof(ms_ecall_register_data_server_t))) {
+		return SGX_ERROR_UNEXPECTED;
+	}
+	sgx_status_t status = SGX_SUCCESS;
+	const char* _tmp_server_id = __in_ms.ms_server_id;
+	size_t _len_server_id = __in_ms.ms_server_id_len ;
+	char* _in_server_id = NULL;
+	sgx_status_t _in_retval;
+
+	CHECK_UNIQUE_POINTER(_tmp_server_id, _len_server_id);
+
+	//
+	// fence after pointer checks
+	//
+	sgx_lfence();
+
+	if (_tmp_server_id != NULL && _len_server_id != 0) {
+		_in_server_id = (char*)malloc(_len_server_id);
+		if (_in_server_id == NULL) {
+			status = SGX_ERROR_OUT_OF_MEMORY;
+			goto err;
+		}
+
+		if (memcpy_s(_in_server_id, _len_server_id, _tmp_server_id, _len_server_id)) {
+			status = SGX_ERROR_UNEXPECTED;
+			goto err;
+		}
+
+		_in_server_id[_len_server_id - 1] = '\0';
+		if (_len_server_id != strlen(_in_server_id) + 1)
+		{
+			status = SGX_ERROR_UNEXPECTED;
+			goto err;
+		}
+	}
+	_in_retval = ecall_register_data_server((const char*)_in_server_id);
+	if (memcpy_verw_s(&ms->ms_retval, sizeof(ms->ms_retval), &_in_retval, sizeof(_in_retval))) {
+		status = SGX_ERROR_UNEXPECTED;
+		goto err;
+	}
+
+err:
+	if (_in_server_id) free(_in_server_id);
+	return status;
+}
+
 static sgx_status_t SGX_CDECL sgx_sgx_ra_get_ga(void* pms)
 {
 	CHECK_REF_POINTER(pms, sizeof(ms_sgx_ra_get_ga_t));
@@ -1784,9 +1845,9 @@ err:
 
 SGX_EXTERNC const struct {
 	size_t nr_ecall;
-	struct {void* ecall_addr; uint8_t is_priv; uint8_t is_switchless;} ecall_table[19];
+	struct {void* ecall_addr; uint8_t is_priv; uint8_t is_switchless;} ecall_table[20];
 } g_ecall_table = {
-	19,
+	20,
 	{
 		{(void*)(uintptr_t)sgx_enclave_init_ra, 0, 0},
 		{(void*)(uintptr_t)sgx_enclave_ra_close, 0, 0},
@@ -1804,6 +1865,7 @@ SGX_EXTERNC const struct {
 		{(void*)(uintptr_t)sgx_kx_decrypt_server, 0, 0},
 		{(void*)(uintptr_t)sgx_ecall_echo, 0, 0},
 		{(void*)(uintptr_t)sgx_ecall_receiver_request, 0, 0},
+		{(void*)(uintptr_t)sgx_ecall_register_data_server, 0, 0},
 		{(void*)(uintptr_t)sgx_sgx_ra_get_ga, 0, 0},
 		{(void*)(uintptr_t)sgx_sgx_ra_proc_msg2_trusted, 0, 0},
 		{(void*)(uintptr_t)sgx_sgx_ra_get_msg3_trusted, 0, 0},
@@ -1812,13 +1874,13 @@ SGX_EXTERNC const struct {
 
 SGX_EXTERNC const struct {
 	size_t nr_ocall;
-	uint8_t entry_table[3][19];
+	uint8_t entry_table[3][20];
 } g_dyn_entry_table = {
 	3,
 	{
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
-		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
 	}
 };
 

@@ -103,7 +103,7 @@ enclave {
             [out, size=1024] uint8_t* output_data,
             [out] uint32_t* output_size);
         
-        /* Receiver request: fetch data from all registered servers and aggregate */
+        /* Receiver request: fetch data from 2 servers and aggregate */
         public sgx_status_t ecall_receiver_request(
             uint32_t client_id,
             [out, size=4096] uint8_t* response_data,
