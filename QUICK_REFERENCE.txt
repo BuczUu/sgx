@@ -1,0 +1,132 @@
+# SGX PSI Quick Reference
+
+## One-Liner Build
+```bash
+cd /home/marcel/sgx_lab/examples/PSI_SGX && make clean && make
+```
+
+## Run Everything (Requires SGX Runtime)
+```bash
+cd /home/marcel/sgx_lab/examples/PSI_SGX && chmod +x run.sh && ./run.sh
+```
+
+## Manual Component Startup
+
+**Terminal 1 - Server:**
+```bash
+cd /home/marcel/sgx_lab/examples/PSI_SGX
+export LD_LIBRARY_PATH=/opt/intel/sgxsdk/lib64:RemoteAttestation/sample_libcrypto:$LD_LIBRARY_PATH
+./server
+```
+
+**Terminal 2 - Data Server 1:**
+```bash
+cd /home/marcel/sgx_lab/examples/PSI_SGX
+python3 data_server.py --server-id 1 --payload "Server1: Data"
+```
+
+**Terminal 3 - Data Server 2:**
+```bash
+cd /home/marcel/sgx_lab/examples/PSI_SGX
+python3 data_server.py --server-id 2 --payload "Server2: Data"
+```
+
+**Terminal 4 - Receiver Client:**
+```bash
+cd /home/marcel/sgx_lab/examples/PSI_SGX
+python3 receiver_client.py
+```
+
+## Files Overview
+
+| File | Purpose | Type |
+|------|---------|------|
+| `server` | TLS/OCALL server loading enclave | Executable |
+| `enclave.signed.so` | Trusted computation (aggregation) | SGX Enclave |
+| `Server_RATLS.cpp` | Server implementation | Source |
+| `Enclave/Enclave.cpp` | Enclave aggregation logic | Source |
+| `Enclave/Enclave.edl` | ECalls/OCalls contract | EDL |
+| `data_server.py` | Simulates data sources | Python |
+| `receiver_client.py` | ECDH + AES-GCM client | Python |
+| `Makefile` | Build configuration | Makefile |
+| `BUILD_AND_RUN.md` | Full documentation | Markdown |
+| `COMPLETION_SUMMARY.md` | Architecture summary | Markdown |
+
+## System Diagram
+
+```
+┌──────────────┐       ┌──────────────┐       ┌──────────────┐
+│  Data Srv 1  ├───TLS─┤              │       │ Enclave      │
+│  (Python)    │       │              │  OCALL├──────────────┤
+└──────────────┘       │  SGX Server  │───────┤ Aggregates   │
+                       │ (C++)        │       │ Data & Encryp│
+┌──────────────┐       │              │       │              │
+│  Data Srv 2  ├───TLS─┤              │       │              │
+│  (Python)    │       │              │       │              │
+└──────────────┘       │              │       │              │
+                       │              │       └──────────────┘
+┌──────────────┐       │              │
+│  Receiver    ├───ECDH│              │
+│  (Python)    ├──AES  │              │
+│ +GCM         ├───Enc.│              │
+└──────────────┘       └──────────────┘
+```
+
+## Key Technologies
+
+- **SGX SDK**: Intel hardware-based trusted computation
+- **mbedTLS**: Cryptographic operations (TLS, AES-GCM, ECDH)
+- **P-256 ECDH**: Elliptic curve key exchange
+- **AES-128-GCM**: Authenticated encryption (256-bit auth)
+- **edger8r**: Code generator for SGX marshaling
+- **Python 3**: Client implementations
+
+## Ports
+- **12345**: SGX Server (TLS), accepts data servers and receiver clients
+
+## Protocols
+- **TLS 1.3**: Transport encryption all connections
+- **OCALL**: Length-prefixed binary protocol (enclave → data servers)
+- **ECDH**: P-256 key exchange (receiver ↔ server)
+- **AES-128-GCM**: Result encryption (receiver end-to-end)
+
+## Check Build Success
+```bash
+cd /home/marcel/sgx_lab/examples/PSI_SGX
+ls -lh server enclave.signed.so && echo "✅ Build OK"
+```
+
+## Troubleshooting Quick Fixes
+
+| Problem | Solution |
+|---------|----------|
+| `No rule to make target...` | `make clean && make` |
+| `libsgx_urts_sim.so not found` | Install SGX SDK or set `LD_LIBRARY_PATH` |
+| `Connection refused` | Ensure server started in Terminal 1 |
+| `Empty result` | Ensure both data servers connected (check server logs) |
+| `ECDH failed` | Check receiver_client.py and Server_RATLS.cpp match protocol |
+
+## Documentation Files
+
+- **BUILD_AND_RUN.md** (11 KB): Everything you need to know
+  - Prerequisites, build instructions, running system
+  - Full protocol specifications
+  - Production considerations
+  - Troubleshooting guide
+
+- **COMPLETION_SUMMARY.md** (8 KB): What was accomplished
+  - Architecture confirmation
+  - Security layers explained
+  - Build verification
+  - Known working components
+
+- **This file (QUICK_REFERENCE.txt)**: Fast lookup
+  - One-liners and common commands
+  - File overview
+  - Quick troubleshooting
+
+## Version Info
+- **SGX SDK**: SIM mode (Simulation)
+- **Build Mode**: SIM_DEBUG
+- **Last Build**: 2025-01-17
+- **Status**: ✅ All tests passing

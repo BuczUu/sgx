@@ -177,35 +177,7 @@ Signed_Enclave_Name := enclave.signed.so
 Enclave_Config_File := Enclave/Enclave.config.xml
 Enclave_Test_Key := Enclave/Enclave_private_test.pem
 
-######## Client Enclave Settings ########
 
-EnclaveClient_Cpp_Files := EnclaveClient/EnclaveClient.cpp
-EnclaveClient_Include_Paths := -IInclude -IEnclaveClient -I$(SGX_SDK)/include -I$(SGX_SDK)/include/tlibc -I$(SGX_SDK)/include/libcxx
-
-EnclaveClient_C_Flags := $(EnclaveClient_Include_Paths) -nostdinc -fvisibility=hidden -fpie -ffunction-sections -fdata-sections $(MITIGATION_CFLAGS)
-ifeq ($(CC_BELOW_4_9), 1)
-    EnclaveClient_C_Flags += -fstack-protector
-else
-    EnclaveClient_C_Flags += -fstack-protector-strong
-endif
-
-EnclaveClient_Cpp_Flags := $(EnclaveClient_C_Flags) -nostdinc++
-
-EnclaveClient_Link_Flags := $(MITIGATION_LDFLAGS) $(Enclave_Security_Link_Flags) \
-    -Wl,--no-undefined -nostdlib -nodefaultlibs -nostartfiles -L$(SGX_TRUSTED_LIBRARY_PATH) \
-	-Wl,--whole-archive -l$(Trts_Library_Name) -Wl,--no-whole-archive \
-	-Wl,--start-group -lsgx_tstdc -lsgx_tcxx -lsgx_tkey_exchange -l$(Crypto_Library_Name) -l$(Service_Library_Name) -Wl,--end-group \
-	-Wl,-Bstatic -Wl,-Bsymbolic -Wl,--no-undefined \
-	-Wl,-pie,-eenclave_entry -Wl,--export-dynamic  \
-	-Wl,--defsym,__ImageBase=0 -Wl,--gc-sections   \
-	-Wl,--version-script=EnclaveClient/EnclaveClient.lds
-
-EnclaveClient_Cpp_Objects := $(sort $(EnclaveClient_Cpp_Files:.cpp=.o))
-
-EnclaveClient_Name := enclaveclient.so
-Signed_EnclaveClient_Name := enclaveclient.signed.so
-EnclaveClient_Config_File := EnclaveClient/EnclaveClient.config.xml
-EnclaveClient_Test_Key := EnclaveClient/EnclaveClient_private_test.pem
 
 ifeq ($(SGX_MODE), HW)
 ifeq ($(SGX_DEBUG), 1)
@@ -241,7 +213,7 @@ target:  $(App_Name) $(Enclave_Name)
 
 
 else
-target: $(App_Name) $(Signed_Enclave_Name) $(Signed_EnclaveClient_Name) $(Server_Name) $(Client_Name)
+target: $(App_Name) $(Signed_Enclave_Name) $(Server_Name)
 ifeq ($(Build_Mode), HW_DEBUG)
 	@echo "The project has been built in debug hardware mode."
 else ifeq ($(Build_Mode), SIM_DEBUG)
@@ -263,7 +235,7 @@ ifneq ($(Build_Mode), HW_RELEASE)
 endif
 
 .config_$(Build_Mode)_$(SGX_ARCH):
-	@rm -f .config_* $(App_Name) $(Enclave_Name) $(Signed_Enclave_Name) $(App_Cpp_Objects) App/Enclave_u.* $(Enclave_Cpp_Objects) Enclave/Enclave_t.* $(EnclaveClient_Name) $(Signed_EnclaveClient_Name) $(EnclaveClient_Cpp_Objects) App/EnclaveClient_u.* EnclaveClient/EnclaveClient_t.*
+	@rm -f .config_* $(App_Name) $(Enclave_Name) $(Signed_Enclave_Name) $(App_Cpp_Objects) Enclave_u.* $(Enclave_Cpp_Objects) Enclave/Enclave_t.* $(Server_Name) *.o
 	@touch .config_$(Build_Mode)_$(SGX_ARCH)
 
 ######## Enclave Untrusted Stubs ########
@@ -314,7 +286,7 @@ endif
 .PHONY: clean
 
 clean:
-	@rm -f .config_* $(App_Name) $(Enclave_Name) $(Signed_Enclave_Name) $(App_Cpp_Objects) Enclave_u.* $(Enclave_Cpp_Objects) Enclave/Enclave_t.* $(Enclave_Test_Key) $(EnclaveClient_Name) $(Signed_EnclaveClient_Name) $(EnclaveClient_Cpp_Objects) EnclaveClient_u.* EnclaveClient/EnclaveClient_t.* $(EnclaveClient_Test_Key) $(Server_Name) $(Client_Name) *.o
+	@rm -f .config_* $(App_Name) $(Enclave_Name) $(Signed_Enclave_Name) $(App_Cpp_Objects) Enclave_u.* $(Enclave_Cpp_Objects) Enclave/Enclave_t.* $(Enclave_Test_Key) $(Server_Name) *.o
 
 ######## Server ########
 
@@ -336,48 +308,6 @@ $(Server_Name): $(Server_Cpp_Objects) ra_tls/ra_tls_fake.o Enclave_u.o
 
 ######## Client Enclave Untrusted Stubs ########
 
-EnclaveClient_u.h: $(SGX_EDGER8R) EnclaveClient/EnclaveClient.edl
-	@$(SGX_EDGER8R) --untrusted EnclaveClient/EnclaveClient.edl --search-path EnclaveClient --search-path $(SGX_SDK)/include
-	@echo "GEN  =>  $@"
 
-EnclaveClient_u.c: EnclaveClient_u.h
 
-EnclaveClient_u.o: EnclaveClient_u.c
-	@$(CC) $(SGX_COMMON_CFLAGS) $(App_C_Flags) -c $< -o $@
-	@echo "CC   <=  $<"
 
-EnclaveClient/EnclaveClient_t.h: $(SGX_EDGER8R) EnclaveClient/EnclaveClient.edl
-	@cd EnclaveClient && $(SGX_EDGER8R) --trusted ../EnclaveClient/EnclaveClient.edl --search-path ../EnclaveClient --search-path $(SGX_SDK)/include
-	@echo "GEN  =>  $@"
-
-EnclaveClient/EnclaveClient_t.c: EnclaveClient/EnclaveClient_t.h
-
-EnclaveClient/EnclaveClient_t.o: EnclaveClient/EnclaveClient_t.c
-	@$(CC) $(SGX_COMMON_CFLAGS) $(EnclaveClient_C_Flags) -c $< -o $@
-	@echo "CC   <=  $<"
-
-EnclaveClient/%.o: EnclaveClient/%.cpp EnclaveClient/EnclaveClient_t.h
-	@$(CXX) $(SGX_COMMON_CXXFLAGS) $(EnclaveClient_Cpp_Flags) -c $< -o $@
-	@echo "CXX  <=  $<"
-
-$(EnclaveClient_Name): EnclaveClient/EnclaveClient_t.o $(EnclaveClient_Cpp_Objects)
-	@$(CXX) $^ -o $@ $(EnclaveClient_Link_Flags)
-	@echo "LINK =>  $@"
-
-$(Signed_EnclaveClient_Name): $(EnclaveClient_Name)
-ifeq ($(wildcard $(EnclaveClient_Test_Key)),)
-	@echo "Generating client enclave test key..."
-	@openssl genrsa -out $(EnclaveClient_Test_Key) -3 3072
-endif
-	@$(SGX_ENCLAVE_SIGNER) sign -key $(EnclaveClient_Test_Key) -enclave $(EnclaveClient_Name) -out $@ -config $(EnclaveClient_Config_File)
-	@echo "SIGN =>  $@"
-
-######## Client Application ########
-
-Client.o: Client.cpp EnclaveClient_u.h
-	@$(CXX) $(SGX_COMMON_CXXFLAGS) -IInclude -I$(SGX_SDK)/include -I. -fPIC -c $< -o $@
-	@echo "CXX  <=  $<"
-
-$(Client_Name): Client.o EnclaveClient_u.o sp/service_provider.o sp/ias_ra.o
-	@$(CXX) $^ -o $@ $(Client_Link_Flags)
-	@echo "LINK =>  $@"
