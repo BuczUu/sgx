@@ -33,6 +33,11 @@ def receiver_client():
             if ALLOW_SIM_MODE:
                 print("[RECEIVER] WARNING: Running in SIM mode - server quote not verified!")
             
+            # Send identification
+            ident = b"RECEIVER\n"
+            ssock.sendall(ident)
+            print("[RECEIVER] Sent identification")
+            
             # ============= ECDH Key Exchange =============
             
             # 1. Receive server's ECDH public key (64 bytes)

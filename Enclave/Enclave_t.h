@@ -38,7 +38,8 @@ sgx_status_t sgx_ra_proc_msg2_trusted(sgx_ra_context_t context, const sgx_ra_msg
 sgx_status_t sgx_ra_get_msg3_trusted(sgx_ra_context_t context, uint32_t quote_size, sgx_report_t* qe_report, sgx_ra_msg3_t* p_msg3, uint32_t msg3_size);
 
 sgx_status_t SGX_CDECL ocall_print_string(const char* str);
-sgx_status_t SGX_CDECL ocall_fetch_from_server(int* retval, int server_id, uint8_t* buffer, uint32_t buffer_size, uint32_t* received_size);
+sgx_status_t SGX_CDECL ocall_send_encrypted(int* retval, const char* server_id, const uint8_t* data, uint32_t data_size, const uint8_t* iv, const uint8_t* gcm_tag);
+sgx_status_t SGX_CDECL ocall_recv_encrypted(int* retval, const char* server_id, uint8_t* data, uint32_t buffer_size, uint8_t* iv, uint8_t* gcm_tag, uint32_t* received_size);
 
 #ifdef __cplusplus
 }

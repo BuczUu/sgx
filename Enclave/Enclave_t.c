@@ -179,13 +179,24 @@ typedef struct ms_ocall_print_string_t {
 	const char* ms_str;
 } ms_ocall_print_string_t;
 
-typedef struct ms_ocall_fetch_from_server_t {
+typedef struct ms_ocall_send_encrypted_t {
 	int ms_retval;
-	int ms_server_id;
-	uint8_t* ms_buffer;
+	const char* ms_server_id;
+	const uint8_t* ms_data;
+	uint32_t ms_data_size;
+	const uint8_t* ms_iv;
+	const uint8_t* ms_gcm_tag;
+} ms_ocall_send_encrypted_t;
+
+typedef struct ms_ocall_recv_encrypted_t {
+	int ms_retval;
+	const char* ms_server_id;
+	uint8_t* ms_data;
 	uint32_t ms_buffer_size;
+	uint8_t* ms_iv;
+	uint8_t* ms_gcm_tag;
 	uint32_t* ms_received_size;
-} ms_ocall_fetch_from_server_t;
+} ms_ocall_recv_encrypted_t;
 
 static sgx_status_t SGX_CDECL sgx_enclave_init_ra(void* pms)
 {
@@ -1801,10 +1812,11 @@ SGX_EXTERNC const struct {
 
 SGX_EXTERNC const struct {
 	size_t nr_ocall;
-	uint8_t entry_table[2][19];
+	uint8_t entry_table[3][19];
 } g_dyn_entry_table = {
-	2,
+	3,
 	{
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
 		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
 		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, },
 	}
@@ -1862,23 +1874,168 @@ sgx_status_t SGX_CDECL ocall_print_string(const char* str)
 	return status;
 }
 
-sgx_status_t SGX_CDECL ocall_fetch_from_server(int* retval, int server_id, uint8_t* buffer, uint32_t buffer_size, uint32_t* received_size)
+sgx_status_t SGX_CDECL ocall_send_encrypted(int* retval, const char* server_id, const uint8_t* data, uint32_t data_size, const uint8_t* iv, const uint8_t* gcm_tag)
 {
 	sgx_status_t status = SGX_SUCCESS;
-	size_t _len_buffer = buffer_size;
-	size_t _len_received_size = sizeof(uint32_t);
+	size_t _len_server_id = server_id ? strlen(server_id) + 1 : 0;
+	size_t _len_data = data_size;
+	size_t _len_iv = 12;
+	size_t _len_gcm_tag = 16;
 
-	ms_ocall_fetch_from_server_t* ms = NULL;
-	size_t ocalloc_size = sizeof(ms_ocall_fetch_from_server_t);
+	ms_ocall_send_encrypted_t* ms = NULL;
+	size_t ocalloc_size = sizeof(ms_ocall_send_encrypted_t);
 	void *__tmp = NULL;
 
-	void *__tmp_buffer = NULL;
+
+	CHECK_ENCLAVE_POINTER(server_id, _len_server_id);
+	CHECK_ENCLAVE_POINTER(data, _len_data);
+	CHECK_ENCLAVE_POINTER(iv, _len_iv);
+	CHECK_ENCLAVE_POINTER(gcm_tag, _len_gcm_tag);
+
+	if (ADD_ASSIGN_OVERFLOW(ocalloc_size, (server_id != NULL) ? _len_server_id : 0))
+		return SGX_ERROR_INVALID_PARAMETER;
+	if (ADD_ASSIGN_OVERFLOW(ocalloc_size, (data != NULL) ? _len_data : 0))
+		return SGX_ERROR_INVALID_PARAMETER;
+	if (ADD_ASSIGN_OVERFLOW(ocalloc_size, (iv != NULL) ? _len_iv : 0))
+		return SGX_ERROR_INVALID_PARAMETER;
+	if (ADD_ASSIGN_OVERFLOW(ocalloc_size, (gcm_tag != NULL) ? _len_gcm_tag : 0))
+		return SGX_ERROR_INVALID_PARAMETER;
+
+	__tmp = sgx_ocalloc(ocalloc_size);
+	if (__tmp == NULL) {
+		sgx_ocfree();
+		return SGX_ERROR_UNEXPECTED;
+	}
+	ms = (ms_ocall_send_encrypted_t*)__tmp;
+	__tmp = (void *)((size_t)__tmp + sizeof(ms_ocall_send_encrypted_t));
+	ocalloc_size -= sizeof(ms_ocall_send_encrypted_t);
+
+	if (server_id != NULL) {
+		if (memcpy_verw_s(&ms->ms_server_id, sizeof(const char*), &__tmp, sizeof(const char*))) {
+			sgx_ocfree();
+			return SGX_ERROR_UNEXPECTED;
+		}
+		if (_len_server_id % sizeof(*server_id) != 0) {
+			sgx_ocfree();
+			return SGX_ERROR_INVALID_PARAMETER;
+		}
+		if (memcpy_verw_s(__tmp, ocalloc_size, server_id, _len_server_id)) {
+			sgx_ocfree();
+			return SGX_ERROR_UNEXPECTED;
+		}
+		__tmp = (void *)((size_t)__tmp + _len_server_id);
+		ocalloc_size -= _len_server_id;
+	} else {
+		ms->ms_server_id = NULL;
+	}
+
+	if (data != NULL) {
+		if (memcpy_verw_s(&ms->ms_data, sizeof(const uint8_t*), &__tmp, sizeof(const uint8_t*))) {
+			sgx_ocfree();
+			return SGX_ERROR_UNEXPECTED;
+		}
+		if (_len_data % sizeof(*data) != 0) {
+			sgx_ocfree();
+			return SGX_ERROR_INVALID_PARAMETER;
+		}
+		if (memcpy_verw_s(__tmp, ocalloc_size, data, _len_data)) {
+			sgx_ocfree();
+			return SGX_ERROR_UNEXPECTED;
+		}
+		__tmp = (void *)((size_t)__tmp + _len_data);
+		ocalloc_size -= _len_data;
+	} else {
+		ms->ms_data = NULL;
+	}
+
+	if (memcpy_verw_s(&ms->ms_data_size, sizeof(ms->ms_data_size), &data_size, sizeof(data_size))) {
+		sgx_ocfree();
+		return SGX_ERROR_UNEXPECTED;
+	}
+
+	if (iv != NULL) {
+		if (memcpy_verw_s(&ms->ms_iv, sizeof(const uint8_t*), &__tmp, sizeof(const uint8_t*))) {
+			sgx_ocfree();
+			return SGX_ERROR_UNEXPECTED;
+		}
+		if (_len_iv % sizeof(*iv) != 0) {
+			sgx_ocfree();
+			return SGX_ERROR_INVALID_PARAMETER;
+		}
+		if (memcpy_verw_s(__tmp, ocalloc_size, iv, _len_iv)) {
+			sgx_ocfree();
+			return SGX_ERROR_UNEXPECTED;
+		}
+		__tmp = (void *)((size_t)__tmp + _len_iv);
+		ocalloc_size -= _len_iv;
+	} else {
+		ms->ms_iv = NULL;
+	}
+
+	if (gcm_tag != NULL) {
+		if (memcpy_verw_s(&ms->ms_gcm_tag, sizeof(const uint8_t*), &__tmp, sizeof(const uint8_t*))) {
+			sgx_ocfree();
+			return SGX_ERROR_UNEXPECTED;
+		}
+		if (_len_gcm_tag % sizeof(*gcm_tag) != 0) {
+			sgx_ocfree();
+			return SGX_ERROR_INVALID_PARAMETER;
+		}
+		if (memcpy_verw_s(__tmp, ocalloc_size, gcm_tag, _len_gcm_tag)) {
+			sgx_ocfree();
+			return SGX_ERROR_UNEXPECTED;
+		}
+		__tmp = (void *)((size_t)__tmp + _len_gcm_tag);
+		ocalloc_size -= _len_gcm_tag;
+	} else {
+		ms->ms_gcm_tag = NULL;
+	}
+
+	status = sgx_ocall(1, ms);
+
+	if (status == SGX_SUCCESS) {
+		if (retval) {
+			if (memcpy_s((void*)retval, sizeof(*retval), &ms->ms_retval, sizeof(ms->ms_retval))) {
+				sgx_ocfree();
+				return SGX_ERROR_UNEXPECTED;
+			}
+		}
+	}
+	sgx_ocfree();
+	return status;
+}
+
+sgx_status_t SGX_CDECL ocall_recv_encrypted(int* retval, const char* server_id, uint8_t* data, uint32_t buffer_size, uint8_t* iv, uint8_t* gcm_tag, uint32_t* received_size)
+{
+	sgx_status_t status = SGX_SUCCESS;
+	size_t _len_server_id = server_id ? strlen(server_id) + 1 : 0;
+	size_t _len_data = buffer_size;
+	size_t _len_iv = 12;
+	size_t _len_gcm_tag = 16;
+	size_t _len_received_size = sizeof(uint32_t);
+
+	ms_ocall_recv_encrypted_t* ms = NULL;
+	size_t ocalloc_size = sizeof(ms_ocall_recv_encrypted_t);
+	void *__tmp = NULL;
+
+	void *__tmp_data = NULL;
+	void *__tmp_iv = NULL;
+	void *__tmp_gcm_tag = NULL;
 	void *__tmp_received_size = NULL;
 
-	CHECK_ENCLAVE_POINTER(buffer, _len_buffer);
+	CHECK_ENCLAVE_POINTER(server_id, _len_server_id);
+	CHECK_ENCLAVE_POINTER(data, _len_data);
+	CHECK_ENCLAVE_POINTER(iv, _len_iv);
+	CHECK_ENCLAVE_POINTER(gcm_tag, _len_gcm_tag);
 	CHECK_ENCLAVE_POINTER(received_size, _len_received_size);
 
-	if (ADD_ASSIGN_OVERFLOW(ocalloc_size, (buffer != NULL) ? _len_buffer : 0))
+	if (ADD_ASSIGN_OVERFLOW(ocalloc_size, (server_id != NULL) ? _len_server_id : 0))
+		return SGX_ERROR_INVALID_PARAMETER;
+	if (ADD_ASSIGN_OVERFLOW(ocalloc_size, (data != NULL) ? _len_data : 0))
+		return SGX_ERROR_INVALID_PARAMETER;
+	if (ADD_ASSIGN_OVERFLOW(ocalloc_size, (iv != NULL) ? _len_iv : 0))
+		return SGX_ERROR_INVALID_PARAMETER;
+	if (ADD_ASSIGN_OVERFLOW(ocalloc_size, (gcm_tag != NULL) ? _len_gcm_tag : 0))
 		return SGX_ERROR_INVALID_PARAMETER;
 	if (ADD_ASSIGN_OVERFLOW(ocalloc_size, (received_size != NULL) ? _len_received_size : 0))
 		return SGX_ERROR_INVALID_PARAMETER;
@@ -1888,35 +2045,83 @@ sgx_status_t SGX_CDECL ocall_fetch_from_server(int* retval, int server_id, uint8
 		sgx_ocfree();
 		return SGX_ERROR_UNEXPECTED;
 	}
-	ms = (ms_ocall_fetch_from_server_t*)__tmp;
-	__tmp = (void *)((size_t)__tmp + sizeof(ms_ocall_fetch_from_server_t));
-	ocalloc_size -= sizeof(ms_ocall_fetch_from_server_t);
+	ms = (ms_ocall_recv_encrypted_t*)__tmp;
+	__tmp = (void *)((size_t)__tmp + sizeof(ms_ocall_recv_encrypted_t));
+	ocalloc_size -= sizeof(ms_ocall_recv_encrypted_t);
 
-	if (memcpy_verw_s(&ms->ms_server_id, sizeof(ms->ms_server_id), &server_id, sizeof(server_id))) {
-		sgx_ocfree();
-		return SGX_ERROR_UNEXPECTED;
-	}
-
-	if (buffer != NULL) {
-		if (memcpy_verw_s(&ms->ms_buffer, sizeof(uint8_t*), &__tmp, sizeof(uint8_t*))) {
+	if (server_id != NULL) {
+		if (memcpy_verw_s(&ms->ms_server_id, sizeof(const char*), &__tmp, sizeof(const char*))) {
 			sgx_ocfree();
 			return SGX_ERROR_UNEXPECTED;
 		}
-		__tmp_buffer = __tmp;
-		if (_len_buffer % sizeof(*buffer) != 0) {
+		if (_len_server_id % sizeof(*server_id) != 0) {
 			sgx_ocfree();
 			return SGX_ERROR_INVALID_PARAMETER;
 		}
-		memset_verw(__tmp_buffer, 0, _len_buffer);
-		__tmp = (void *)((size_t)__tmp + _len_buffer);
-		ocalloc_size -= _len_buffer;
+		if (memcpy_verw_s(__tmp, ocalloc_size, server_id, _len_server_id)) {
+			sgx_ocfree();
+			return SGX_ERROR_UNEXPECTED;
+		}
+		__tmp = (void *)((size_t)__tmp + _len_server_id);
+		ocalloc_size -= _len_server_id;
 	} else {
-		ms->ms_buffer = NULL;
+		ms->ms_server_id = NULL;
+	}
+
+	if (data != NULL) {
+		if (memcpy_verw_s(&ms->ms_data, sizeof(uint8_t*), &__tmp, sizeof(uint8_t*))) {
+			sgx_ocfree();
+			return SGX_ERROR_UNEXPECTED;
+		}
+		__tmp_data = __tmp;
+		if (_len_data % sizeof(*data) != 0) {
+			sgx_ocfree();
+			return SGX_ERROR_INVALID_PARAMETER;
+		}
+		memset_verw(__tmp_data, 0, _len_data);
+		__tmp = (void *)((size_t)__tmp + _len_data);
+		ocalloc_size -= _len_data;
+	} else {
+		ms->ms_data = NULL;
 	}
 
 	if (memcpy_verw_s(&ms->ms_buffer_size, sizeof(ms->ms_buffer_size), &buffer_size, sizeof(buffer_size))) {
 		sgx_ocfree();
 		return SGX_ERROR_UNEXPECTED;
+	}
+
+	if (iv != NULL) {
+		if (memcpy_verw_s(&ms->ms_iv, sizeof(uint8_t*), &__tmp, sizeof(uint8_t*))) {
+			sgx_ocfree();
+			return SGX_ERROR_UNEXPECTED;
+		}
+		__tmp_iv = __tmp;
+		if (_len_iv % sizeof(*iv) != 0) {
+			sgx_ocfree();
+			return SGX_ERROR_INVALID_PARAMETER;
+		}
+		memset_verw(__tmp_iv, 0, _len_iv);
+		__tmp = (void *)((size_t)__tmp + _len_iv);
+		ocalloc_size -= _len_iv;
+	} else {
+		ms->ms_iv = NULL;
+	}
+
+	if (gcm_tag != NULL) {
+		if (memcpy_verw_s(&ms->ms_gcm_tag, sizeof(uint8_t*), &__tmp, sizeof(uint8_t*))) {
+			sgx_ocfree();
+			return SGX_ERROR_UNEXPECTED;
+		}
+		__tmp_gcm_tag = __tmp;
+		if (_len_gcm_tag % sizeof(*gcm_tag) != 0) {
+			sgx_ocfree();
+			return SGX_ERROR_INVALID_PARAMETER;
+		}
+		memset_verw(__tmp_gcm_tag, 0, _len_gcm_tag);
+		__tmp = (void *)((size_t)__tmp + _len_gcm_tag);
+		ocalloc_size -= _len_gcm_tag;
+	} else {
+		ms->ms_gcm_tag = NULL;
 	}
 
 	if (received_size != NULL) {
@@ -1936,7 +2141,7 @@ sgx_status_t SGX_CDECL ocall_fetch_from_server(int* retval, int server_id, uint8
 		ms->ms_received_size = NULL;
 	}
 
-	status = sgx_ocall(1, ms);
+	status = sgx_ocall(2, ms);
 
 	if (status == SGX_SUCCESS) {
 		if (retval) {
@@ -1945,8 +2150,20 @@ sgx_status_t SGX_CDECL ocall_fetch_from_server(int* retval, int server_id, uint8
 				return SGX_ERROR_UNEXPECTED;
 			}
 		}
-		if (buffer) {
-			if (memcpy_s((void*)buffer, _len_buffer, __tmp_buffer, _len_buffer)) {
+		if (data) {
+			if (memcpy_s((void*)data, _len_data, __tmp_data, _len_data)) {
+				sgx_ocfree();
+				return SGX_ERROR_UNEXPECTED;
+			}
+		}
+		if (iv) {
+			if (memcpy_s((void*)iv, _len_iv, __tmp_iv, _len_iv)) {
+				sgx_ocfree();
+				return SGX_ERROR_UNEXPECTED;
+			}
+		}
+		if (gcm_tag) {
+			if (memcpy_s((void*)gcm_tag, _len_gcm_tag, __tmp_gcm_tag, _len_gcm_tag)) {
 				sgx_ocfree();
 				return SGX_ERROR_UNEXPECTED;
 			}

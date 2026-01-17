@@ -13,6 +13,7 @@
 #include <arpa/inet.h>
 #include <time.h>
 #include <errno.h>
+#include <stdint.h>
 
 #include "ra_tls.h"
 #include "mbedtls/ssl.h"
@@ -28,67 +29,128 @@
 
 extern "C" void ocall_print_string(const char *str) { printf("%s", str); }
 
-/* OCALL: Fetch data from external server (simple TCP client) */
-extern "C" int ocall_fetch_from_server(int server_id, uint8_t *buffer, uint32_t buffer_size, uint32_t *received_size)
+/* ===== Dynamic Connection Storage for TLS clients (receiver + data servers) ===== */
+struct ClientConnection
 {
-    printf("[OCALL] Fetching data from server %d...\n", server_id);
+    char client_id[64];       // "RECEIVER" or "SERVER:<n>"
+    mbedtls_ssl_context *ssl; // TLS context
+    int active;
+};
 
-    const char *host = "127.0.0.1";
-    int port = (server_id == 1) ? 9001 : 9002;
+#define MAX_CLIENTS 128
+static ClientConnection g_clients[MAX_CLIENTS];
+static int g_client_count = 0;
+static pthread_mutex_t g_clients_lock = PTHREAD_MUTEX_INITIALIZER;
 
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0)
+void add_client_connection(const char *client_id, mbedtls_ssl_context *ssl_ctx)
+{
+    pthread_mutex_lock(&g_clients_lock);
+    if (g_client_count < MAX_CLIENTS)
     {
-        printf("[OCALL] Failed to create socket: %s\n", strerror(errno));
+        strncpy(g_clients[g_client_count].client_id, client_id, 63);
+        g_clients[g_client_count].client_id[63] = '\0';
+        g_clients[g_client_count].ssl = ssl_ctx;
+        g_clients[g_client_count].active = 1;
+        printf("[SERVER] Registered client '%s' (total=%d)\n", client_id, g_client_count + 1);
+        g_client_count++;
+    }
+    pthread_mutex_unlock(&g_clients_lock);
+}
+
+ClientConnection *get_client_connection(const char *client_id)
+{
+    ClientConnection *result = NULL;
+    pthread_mutex_lock(&g_clients_lock);
+    for (int i = 0; i < g_client_count; i++)
+    {
+        if (g_clients[i].active && strcmp(g_clients[i].client_id, client_id) == 0)
+        {
+            result = &g_clients[i];
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_clients_lock);
+    return result;
+}
+
+/* OCALL: Send data to Data Server over TLS (length-prefixed plain payload) */
+extern "C" int ocall_send_encrypted(const char *server_id, const uint8_t *data,
+                                    uint32_t data_size, const uint8_t *iv, const uint8_t *gcm_tag)
+{
+    (void)iv;
+    (void)gcm_tag;
+    printf("[OCALL] Sending data to '%s' (%u bytes)...\n", server_id, data_size);
+
+    ClientConnection *conn = get_client_connection(server_id);
+    if (!conn || !conn->ssl)
+    {
+        printf("[OCALL] Client '%s' not connected\n", server_id);
         return -1;
     }
 
-    struct sockaddr_in server_addr;
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
+    uint32_t size_le = data_size;
+    uint8_t hdr[4];
+    memcpy(hdr, &size_le, 4);
 
-    if (inet_pton(AF_INET, host, &server_addr.sin_addr) <= 0)
+    int ret = mbedtls_ssl_write(conn->ssl, hdr, 4);
+    if (ret != 4)
     {
-        printf("[OCALL] Invalid address\n");
-        close(sock);
+        printf("[OCALL] Failed to send size to '%s' (ret=%d)\n", server_id, ret);
         return -1;
     }
 
-    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+    ret = mbedtls_ssl_write(conn->ssl, data, data_size);
+    if (ret != (int)data_size)
     {
-        printf("[OCALL] Connection to server %d failed: %s\n", server_id, strerror(errno));
-        close(sock);
+        printf("[OCALL] Failed to send payload to '%s' (ret=%d)\n", server_id, ret);
         return -1;
     }
 
-    printf("[OCALL] Connected to server %d at %s:%d\n", server_id, host, port);
+    printf("[OCALL] Sent %u bytes to '%s'\n", data_size, server_id);
+    return 0;
+}
 
-    // Send simple request
-    const char *request = "GET_DATA\n";
-    ssize_t sent = send(sock, request, strlen(request), 0);
-    if (sent < 0)
+/* OCALL: Receive data from Data Server over TLS (length-prefixed plain payload) */
+extern "C" int ocall_recv_encrypted(const char *server_id, uint8_t *data,
+                                    uint32_t buffer_size, uint8_t *iv, uint8_t *gcm_tag,
+                                    uint32_t *received_size)
+{
+    (void)iv;
+    (void)gcm_tag;
+    printf("[OCALL] Receiving data from '%s'...\n", server_id);
+
+    ClientConnection *conn = get_client_connection(server_id);
+    if (!conn || !conn->ssl)
     {
-        printf("[OCALL] Send failed\n");
-        close(sock);
+        printf("[OCALL] Client '%s' not connected\n", server_id);
         return -1;
     }
 
-    // Receive response
-    ssize_t received = recv(sock, buffer, buffer_size - 1, 0);
-    if (received < 0)
+    uint8_t hdr[4];
+    int ret = mbedtls_ssl_read(conn->ssl, hdr, 4);
+    if (ret != 4)
     {
-        printf("[OCALL] Receive failed\n");
-        close(sock);
+        printf("[OCALL] Failed to read size from '%s' (ret=%d)\n", server_id, ret);
         return -1;
     }
 
-    buffer[received] = '\0'; // Null terminate
-    *received_size = (uint32_t)received;
+    uint32_t data_size = 0;
+    memcpy(&data_size, hdr, 4);
+    if (data_size > buffer_size)
+    {
+        printf("[OCALL] Buffer too small (need %u)\n", data_size);
+        return -1;
+    }
 
-    printf("[OCALL] Received %zd bytes from server %d: %s\n", received, server_id, buffer);
+    ret = mbedtls_ssl_read(conn->ssl, data, data_size);
+    if (ret != (int)data_size)
+    {
+        printf("[OCALL] Failed to read payload from '%s' (ret=%d)\n", server_id, ret);
+        return -1;
+    }
 
-    close(sock);
+    *received_size = data_size;
+    printf("[OCALL] Received %u bytes from '%s'\n", data_size, server_id);
     return 0;
 }
 
@@ -146,7 +208,6 @@ int load_fake_ratls_key(mbedtls_pk_context *key)
 }
 
 #define PORT 12345
-#define MAX_CLIENTS 10
 #define SET_SIZE 10
 
 sgx_enclave_id_t global_eid = 0;
@@ -159,6 +220,7 @@ typedef struct
 {
     mbedtls_ssl_context *ssl;
     mbedtls_net_context *client_fd;
+    mbedtls_ssl_config *conf;
     int client_id;
     pthread_t thread;
 } client_info_t;
@@ -203,6 +265,10 @@ void *client_handler(void *arg)
     uint32_t psi_result[SET_SIZE];
     uint32_t psi_result_size = 0;
 
+    char client_id_buf[64] = {0};
+    char client_id_str[64] = {0};
+    int id_len = 0;
+
     LOG_PRINTF("[SERVER] Client %d: Connected\n", client_id);
 
     // TLS handshake
@@ -215,6 +281,35 @@ void *client_handler(void *arg)
         }
     }
     LOG_PRINTF("[SERVER] Client %d: TLS handshake OK\n", client_id);
+
+    // ===== READ CLIENT IDENTIFICATION =====
+    ret = mbedtls_ssl_read(ssl, (uint8_t *)client_id_buf, sizeof(client_id_buf) - 1);
+    if (ret <= 0)
+    {
+        LOG_PRINTF("[SERVER] Client %d: Failed to read identification (ret=%d)\n", client_id, ret);
+        goto cleanup;
+    }
+    for (int i = 0; i < ret; i++)
+    {
+        if (client_id_buf[i] == '\n' || client_id_buf[i] == '\0')
+            break;
+        client_id_str[id_len++] = client_id_buf[i];
+    }
+    client_id_str[id_len] = '\0';
+    LOG_PRINTF("[SERVER] Client %d: Identified as '%s'\n", client_id, client_id_str);
+
+    if (strncmp(client_id_str, "SERVER:", 7) == 0)
+    {
+        add_client_connection(client_id_str, ssl);
+        LOG_PRINTF("[SERVER] Data server '%s' registered (TLS)\n", client_id_str);
+        // keep connection alive for OCALL use
+        while (1)
+        {
+            sleep(10);
+        }
+    }
+
+    // From here on, it's a RECEIVER client
 
     // Generate server ECDH pubkey in enclave
     LOG_PRINTF("[SERVER] Client %d: Calling kx_server_init...\n", client_id);
@@ -503,6 +598,11 @@ cleanup:
     mbedtls_ssl_close_notify(ssl);
     mbedtls_ssl_free(ssl);
     free(ssl);
+    if (client->conf)
+    {
+        mbedtls_ssl_config_free(client->conf);
+        free(client->conf);
+    }
     if (client->client_fd)
     {
         mbedtls_net_free(client->client_fd);
@@ -595,6 +695,7 @@ int main()
         client_info_t *info = (client_info_t *)malloc(sizeof(client_info_t));
         info->ssl = ssl;
         info->client_fd = client_fd;
+        info->conf = conf;
         info->client_id = client_id;
 
         pthread_create(&info->thread, NULL, client_handler, (void *)info);

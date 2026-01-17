@@ -515,24 +515,39 @@ sgx_status_t ecall_receiver_request(uint32_t client_id,
     uint8_t buffer1[2048] = {0};
     uint8_t buffer2[2048] = {0};
     uint32_t size1 = 0, size2 = 0;
-    int ret;
+    const char *req = "GET_DATA";
+    uint8_t dummy_iv[12] = {0};
+    uint8_t dummy_tag[16] = {0};
+    int ocall_ret = 0;
 
-    // Fetch data from server 1
-    printf("[ENCLAVE] Calling OCALL to fetch from server 1...\n");
-    sgx_status_t status = ocall_fetch_from_server(&ret, 1, buffer1, sizeof(buffer1), &size1);
-    if (status != SGX_SUCCESS || ret != 0)
+    printf("[ENCLAVE] Calling OCALL send to SERVER:1...\n");
+    sgx_status_t status = ocall_send_encrypted(&ocall_ret, "SERVER:1", (const uint8_t *)req, (uint32_t)strlen(req), dummy_iv, dummy_tag);
+    if (status != SGX_SUCCESS || ocall_ret != 0)
     {
-        printf("[ENCLAVE] Failed to fetch from server 1: ocall=0x%x, ret=%d\n", status, ret);
+        printf("[ENCLAVE] Failed to send to server 1: ocall=0x%x, ret=%d\n", status, ocall_ret);
+        return SGX_ERROR_UNEXPECTED;
+    }
+
+    status = ocall_recv_encrypted(&ocall_ret, "SERVER:1", buffer1, sizeof(buffer1), dummy_iv, dummy_tag, &size1);
+    if (status != SGX_SUCCESS || ocall_ret != 0)
+    {
+        printf("[ENCLAVE] Failed to receive from server 1: ocall=0x%x, ret=%d\n", status, ocall_ret);
         return SGX_ERROR_UNEXPECTED;
     }
     printf("[ENCLAVE] Received %u bytes from server 1\n", size1);
 
-    // Fetch data from server 2
-    printf("[ENCLAVE] Calling OCALL to fetch from server 2...\n");
-    status = ocall_fetch_from_server(&ret, 2, buffer2, sizeof(buffer2), &size2);
-    if (status != SGX_SUCCESS || ret != 0)
+    printf("[ENCLAVE] Calling OCALL send to SERVER:2...\n");
+    status = ocall_send_encrypted(&ocall_ret, "SERVER:2", (const uint8_t *)req, (uint32_t)strlen(req), dummy_iv, dummy_tag);
+    if (status != SGX_SUCCESS || ocall_ret != 0)
     {
-        printf("[ENCLAVE] Failed to fetch from server 2: ocall=0x%x, ret=%d\n", status, ret);
+        printf("[ENCLAVE] Failed to send to server 2: ocall=0x%x, ret=%d\n", status, ocall_ret);
+        return SGX_ERROR_UNEXPECTED;
+    }
+
+    status = ocall_recv_encrypted(&ocall_ret, "SERVER:2", buffer2, sizeof(buffer2), dummy_iv, dummy_tag, &size2);
+    if (status != SGX_SUCCESS || ocall_ret != 0)
+    {
+        printf("[ENCLAVE] Failed to receive from server 2: ocall=0x%x, ret=%d\n", status, ocall_ret);
         return SGX_ERROR_UNEXPECTED;
     }
     printf("[ENCLAVE] Received %u bytes from server 2\n", size2);

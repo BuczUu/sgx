@@ -113,11 +113,21 @@ enclave {
     untrusted {
         void ocall_print_string([in, string] const char *str);
         
-        /* Fetch data from external server (non-SGX) */
-        int ocall_fetch_from_server(
-            int server_id,
-            [out, size=buffer_size] uint8_t* buffer,
+        /* Send data to a registered data server over TLS */
+        int ocall_send_encrypted(
+            [in, string] const char* server_id,
+            [in, size=data_size] const uint8_t* data,
+            uint32_t data_size,
+            [in, size=12] const uint8_t* iv,
+            [in, size=16] const uint8_t* gcm_tag);
+
+        /* Receive data from a registered data server over TLS */
+        int ocall_recv_encrypted(
+            [in, string] const char* server_id,
+            [out, size=buffer_size] uint8_t* data,
             uint32_t buffer_size,
+            [out, size=12] uint8_t* iv,
+            [out, size=16] uint8_t* gcm_tag,
             [out] uint32_t* received_size);
     };
 };

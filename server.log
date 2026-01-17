@@ -4,4 +4,55 @@
 [RA-TLS] First 16 bytes of cert: 30 82 01 6e 30 82 01 14 a0 03 02 01 02 02 01 01
 [RA-TLS] Key DER len=121, key_old_size=4096, moving from offset 3975
 [SERVER] RA-TLS cert generated (370 bytes)
-[SERVER] Failed to bind
+[SERVER] Listening on port 12345
+[SERVER] Cert and key loaded
+[SERVER] Client 2: Connected
+[SERVER] Client 2: TLS handshake OK
+[SERVER] Client 2: Identified as 'SERVER:1'
+[SERVER] Registered client 'SERVER:1' (total=1)
+[SERVER] Data server 'SERVER:1' registered (TLS)
+[SERVER] Client 1: Connected
+[SERVER] Client 1: TLS handshake OK
+[SERVER] Client 1: Identified as 'SERVER:2'
+[SERVER] Registered client 'SERVER:2' (total=2)
+[SERVER] Data server 'SERVER:2' registered (TLS)
+[SERVER] Client 2: Connected
+[SERVER] Client 2: TLS handshake OK
+[SERVER] Client 2: Identified as 'RECEIVER'
+[SERVER] Client 2: Calling kx_server_init...
+[SERVER] Client 2: kx_server_init returned with status=0x0
+[SERVER] Client 2: Server pubkey generated
+[SERVER] Client 2: Sending pubkey (64 bytes)...
+[SERVER] Client 2: mbedtls_ssl_write returned: 64
+[SERVER] Client 2: Server pubkey sent
+[SERVER] Client 2: Waiting for client pubkey...
+[SERVER] Client 2: mbedtls_ssl_read returned: 64
+[SERVER] Client 2: Client pubkey received
+[SERVER] Client 2: Calling kx_server_finish...
+[ENCLAVE] kx_server_finish: Shared secret first 16 bytes: 5dc1c868985b2b6b814faa24648af292
+[ENCLAVE] kx_server_finish: Derived AES key (16 bytes): 4daa93dfaa891c43c6ebaf1e54897f59
+[SERVER] Client 2: kx_server_finish returned: 0x0 (status=0x0)
+[SERVER] Client 2: ECDH complete
+[SERVER] Client 2: Entering receiver loop (send 'FETCH' for data, 'QUIT' to exit)
+[SERVER] Client 2: Received command: F
+[SERVER] Client 2: Calling ecall_receiver_request...
+[ENCLAVE] Receiver request from client 2
+[ENCLAVE] Calling OCALL send to SERVER:1...
+[OCALL] Sending data to 'SERVER:1' (8 bytes)...
+[OCALL] Sent 8 bytes to 'SERVER:1'
+[OCALL] Receiving data from 'SERVER:1'...
+[OCALL] Received 42 bytes from 'SERVER:1'
+[ENCLAVE] Received 42 bytes from server 1
+[ENCLAVE] Calling OCALL send to SERVER:2...
+[OCALL] Sending data to 'SERVER:2' (8 bytes)...
+[OCALL] Sent 8 bytes to 'SERVER:2'
+[OCALL] Receiving data from 'SERVER:2'...
+[OCALL] Received 42 bytes from 'SERVER:2'
+[ENCLAVE] Received 42 bytes from server 2
+[ENCLAVE] Aggregated response: 87 bytes total
+[SERVER] Client 2: Aggregated 87 bytes
+[ENCLAVE] kx_get_key: Using AES key: 4daa93dfaa891c43c6ebaf1e54897f59
+[SERVER] Client 2: Sent encrypted response (87 bytes actual data)
+[SERVER] Client 2: Received command: Q
+[SERVER] Client 2: QUIT command received
+[SERVER] Client 2: Exiting receiver loop
