@@ -74,8 +74,7 @@ enclave {
 
         public sgx_status_t kx_server_finish(
             uint32_t client_id,
-            [in, size=64] const uint8_t* client_pubkey,
-            [out] sgx_status_t* enclave_ret);
+            [in, size=64] const uint8_t* client_pubkey);
 
         public sgx_status_t kx_encrypt_server(
             uint32_t client_id,
@@ -103,9 +102,22 @@ enclave {
             uint32_t input_size,
             [out, size=1024] uint8_t* output_data,
             [out] uint32_t* output_size);
+        
+        /* Receiver request: fetch data from 2 servers and aggregate */
+        public sgx_status_t ecall_receiver_request(
+            uint32_t client_id,
+            [out, size=4096] uint8_t* response_data,
+            [out] uint32_t* response_size);
     };
     
     untrusted {
         void ocall_print_string([in, string] const char *str);
+        
+        /* Fetch data from external server (non-SGX) */
+        int ocall_fetch_from_server(
+            int server_id,
+            [out, size=buffer_size] uint8_t* buffer,
+            uint32_t buffer_size,
+            [out] uint32_t* received_size);
     };
 };

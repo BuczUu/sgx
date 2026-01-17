@@ -109,6 +109,22 @@ typedef struct ms_kx_decrypt_server_t {
 	uint32_t* ms_plain_count;
 } ms_kx_decrypt_server_t;
 
+typedef struct ms_ecall_echo_t {
+	sgx_status_t ms_retval;
+	uint32_t ms_client_id;
+	const uint8_t* ms_input_data;
+	uint32_t ms_input_size;
+	uint8_t* ms_output_data;
+	uint32_t* ms_output_size;
+} ms_ecall_echo_t;
+
+typedef struct ms_ecall_receiver_request_t {
+	sgx_status_t ms_retval;
+	uint32_t ms_client_id;
+	uint8_t* ms_response_data;
+	uint32_t* ms_response_size;
+} ms_ecall_receiver_request_t;
+
 typedef struct ms_sgx_ra_get_ga_t {
 	sgx_status_t ms_retval;
 	sgx_ra_context_t ms_context;
@@ -137,6 +153,14 @@ typedef struct ms_ocall_print_string_t {
 	const char* ms_str;
 } ms_ocall_print_string_t;
 
+typedef struct ms_ocall_fetch_from_server_t {
+	int ms_retval;
+	int ms_server_id;
+	uint8_t* ms_buffer;
+	uint32_t ms_buffer_size;
+	uint32_t* ms_received_size;
+} ms_ocall_fetch_from_server_t;
+
 static sgx_status_t SGX_CDECL Enclave_ocall_print_string(void* pms)
 {
 	ms_ocall_print_string_t* ms = SGX_CAST(ms_ocall_print_string_t*, pms);
@@ -145,13 +169,22 @@ static sgx_status_t SGX_CDECL Enclave_ocall_print_string(void* pms)
 	return SGX_SUCCESS;
 }
 
+static sgx_status_t SGX_CDECL Enclave_ocall_fetch_from_server(void* pms)
+{
+	ms_ocall_fetch_from_server_t* ms = SGX_CAST(ms_ocall_fetch_from_server_t*, pms);
+	ms->ms_retval = ocall_fetch_from_server(ms->ms_server_id, ms->ms_buffer, ms->ms_buffer_size, ms->ms_received_size);
+
+	return SGX_SUCCESS;
+}
+
 static const struct {
 	size_t nr_ocall;
-	void * table[1];
+	void * table[2];
 } ocall_table_Enclave = {
-	1,
+	2,
 	{
 		(void*)Enclave_ocall_print_string,
+		(void*)Enclave_ocall_fetch_from_server,
 	}
 };
 sgx_status_t enclave_init_ra(sgx_enclave_id_t eid, sgx_status_t* retval, int b_pse, sgx_ra_context_t* p_context)
@@ -332,13 +365,39 @@ sgx_status_t kx_decrypt_server(sgx_enclave_id_t eid, sgx_status_t* retval, uint3
 	return status;
 }
 
+sgx_status_t ecall_echo(sgx_enclave_id_t eid, sgx_status_t* retval, uint32_t client_id, const uint8_t* input_data, uint32_t input_size, uint8_t* output_data, uint32_t* output_size)
+{
+	sgx_status_t status;
+	ms_ecall_echo_t ms;
+	ms.ms_client_id = client_id;
+	ms.ms_input_data = input_data;
+	ms.ms_input_size = input_size;
+	ms.ms_output_data = output_data;
+	ms.ms_output_size = output_size;
+	status = sgx_ecall(eid, 14, &ocall_table_Enclave, &ms);
+	if (status == SGX_SUCCESS && retval) *retval = ms.ms_retval;
+	return status;
+}
+
+sgx_status_t ecall_receiver_request(sgx_enclave_id_t eid, sgx_status_t* retval, uint32_t client_id, uint8_t* response_data, uint32_t* response_size)
+{
+	sgx_status_t status;
+	ms_ecall_receiver_request_t ms;
+	ms.ms_client_id = client_id;
+	ms.ms_response_data = response_data;
+	ms.ms_response_size = response_size;
+	status = sgx_ecall(eid, 15, &ocall_table_Enclave, &ms);
+	if (status == SGX_SUCCESS && retval) *retval = ms.ms_retval;
+	return status;
+}
+
 sgx_status_t sgx_ra_get_ga(sgx_enclave_id_t eid, sgx_status_t* retval, sgx_ra_context_t context, sgx_ec256_public_t* g_a)
 {
 	sgx_status_t status;
 	ms_sgx_ra_get_ga_t ms;
 	ms.ms_context = context;
 	ms.ms_g_a = g_a;
-	status = sgx_ecall(eid, 14, &ocall_table_Enclave, &ms);
+	status = sgx_ecall(eid, 16, &ocall_table_Enclave, &ms);
 	if (status == SGX_SUCCESS && retval) *retval = ms.ms_retval;
 	return status;
 }
@@ -352,7 +411,7 @@ sgx_status_t sgx_ra_proc_msg2_trusted(sgx_enclave_id_t eid, sgx_status_t* retval
 	ms.ms_p_qe_target = p_qe_target;
 	ms.ms_p_report = p_report;
 	ms.ms_p_nonce = p_nonce;
-	status = sgx_ecall(eid, 15, &ocall_table_Enclave, &ms);
+	status = sgx_ecall(eid, 17, &ocall_table_Enclave, &ms);
 	if (status == SGX_SUCCESS && retval) *retval = ms.ms_retval;
 	return status;
 }
@@ -366,7 +425,7 @@ sgx_status_t sgx_ra_get_msg3_trusted(sgx_enclave_id_t eid, sgx_status_t* retval,
 	ms.ms_qe_report = qe_report;
 	ms.ms_p_msg3 = p_msg3;
 	ms.ms_msg3_size = msg3_size;
-	status = sgx_ecall(eid, 16, &ocall_table_Enclave, &ms);
+	status = sgx_ecall(eid, 18, &ocall_table_Enclave, &ms);
 	if (status == SGX_SUCCESS && retval) *retval = ms.ms_retval;
 	return status;
 }

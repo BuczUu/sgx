@@ -22,6 +22,10 @@ extern "C" {
 #define OCALL_PRINT_STRING_DEFINED__
 void SGX_UBRIDGE(SGX_NOCONVENTION, ocall_print_string, (const char* str));
 #endif
+#ifndef OCALL_FETCH_FROM_SERVER_DEFINED__
+#define OCALL_FETCH_FROM_SERVER_DEFINED__
+int SGX_UBRIDGE(SGX_NOCONVENTION, ocall_fetch_from_server, (int server_id, uint8_t* buffer, uint32_t buffer_size, uint32_t* received_size));
+#endif
 
 sgx_status_t enclave_init_ra(sgx_enclave_id_t eid, sgx_status_t* retval, int b_pse, sgx_ra_context_t* p_context);
 sgx_status_t enclave_ra_close(sgx_enclave_id_t eid, sgx_status_t* retval, sgx_ra_context_t context);
@@ -37,6 +41,8 @@ sgx_status_t kx_server_init(sgx_enclave_id_t eid, sgx_status_t* retval, uint32_t
 sgx_status_t kx_server_finish(sgx_enclave_id_t eid, sgx_status_t* retval, uint32_t client_id, const uint8_t* client_pubkey);
 sgx_status_t kx_encrypt_server(sgx_enclave_id_t eid, sgx_status_t* retval, uint32_t client_id, const uint32_t* plaintext, uint32_t plain_count, const uint8_t* iv, uint8_t* ciphertext, uint32_t cipher_size, uint8_t* gcm_tag);
 sgx_status_t kx_decrypt_server(sgx_enclave_id_t eid, sgx_status_t* retval, uint32_t client_id, const uint8_t* ciphertext, uint32_t cipher_size, const uint8_t* iv, const uint8_t* gcm_tag, uint32_t* plaintext, uint32_t plain_max, uint32_t* plain_count);
+sgx_status_t ecall_echo(sgx_enclave_id_t eid, sgx_status_t* retval, uint32_t client_id, const uint8_t* input_data, uint32_t input_size, uint8_t* output_data, uint32_t* output_size);
+sgx_status_t ecall_receiver_request(sgx_enclave_id_t eid, sgx_status_t* retval, uint32_t client_id, uint8_t* response_data, uint32_t* response_size);
 sgx_status_t sgx_ra_get_ga(sgx_enclave_id_t eid, sgx_status_t* retval, sgx_ra_context_t context, sgx_ec256_public_t* g_a);
 sgx_status_t sgx_ra_proc_msg2_trusted(sgx_enclave_id_t eid, sgx_status_t* retval, sgx_ra_context_t context, const sgx_ra_msg2_t* p_msg2, const sgx_target_info_t* p_qe_target, sgx_report_t* p_report, sgx_quote_nonce_t* p_nonce);
 sgx_status_t sgx_ra_get_msg3_trusted(sgx_enclave_id_t eid, sgx_status_t* retval, sgx_ra_context_t context, uint32_t quote_size, sgx_report_t* qe_report, sgx_ra_msg3_t* p_msg3, uint32_t msg3_size);

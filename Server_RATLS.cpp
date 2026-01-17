@@ -28,6 +28,70 @@
 
 extern "C" void ocall_print_string(const char *str) { printf("%s", str); }
 
+/* OCALL: Fetch data from external server (simple TCP client) */
+extern "C" int ocall_fetch_from_server(int server_id, uint8_t *buffer, uint32_t buffer_size, uint32_t *received_size)
+{
+    printf("[OCALL] Fetching data from server %d...\n", server_id);
+
+    const char *host = "127.0.0.1";
+    int port = (server_id == 1) ? 9001 : 9002;
+
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0)
+    {
+        printf("[OCALL] Failed to create socket: %s\n", strerror(errno));
+        return -1;
+    }
+
+    struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(port);
+
+    if (inet_pton(AF_INET, host, &server_addr.sin_addr) <= 0)
+    {
+        printf("[OCALL] Invalid address\n");
+        close(sock);
+        return -1;
+    }
+
+    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+    {
+        printf("[OCALL] Connection to server %d failed: %s\n", server_id, strerror(errno));
+        close(sock);
+        return -1;
+    }
+
+    printf("[OCALL] Connected to server %d at %s:%d\n", server_id, host, port);
+
+    // Send simple request
+    const char *request = "GET_DATA\n";
+    ssize_t sent = send(sock, request, strlen(request), 0);
+    if (sent < 0)
+    {
+        printf("[OCALL] Send failed\n");
+        close(sock);
+        return -1;
+    }
+
+    // Receive response
+    ssize_t received = recv(sock, buffer, buffer_size - 1, 0);
+    if (received < 0)
+    {
+        printf("[OCALL] Receive failed\n");
+        close(sock);
+        return -1;
+    }
+
+    buffer[received] = '\0'; // Null terminate
+    *received_size = (uint32_t)received;
+
+    printf("[OCALL] Received %zd bytes from server %d: %s\n", received, server_id, buffer);
+
+    close(sock);
+    return 0;
+}
+
 #define LOG_PRINTF(fmt, ...)        \
     do                              \
     {                               \
@@ -194,8 +258,8 @@ void *client_handler(void *arg)
 
     // Complete ECDH in enclave
     LOG_PRINTF("[SERVER] Client %d: Calling kx_server_finish...\n", client_id);
-    status = kx_server_finish(global_eid, &enclave_ret, client_id, client_pubkey_le);
-    LOG_PRINTF("[SERVER] Client %d: kx_server_finish returned: 0x%x / 0x%x\n", client_id, status, enclave_ret);
+    enclave_ret = kx_server_finish(global_eid, &status, client_id, client_pubkey_le);
+    LOG_PRINTF("[SERVER] Client %d: kx_server_finish returned: 0x%x (status=0x%x)\n", client_id, enclave_ret, status);
     if (status != SGX_SUCCESS)
     {
         LOG_PRINTF("[SERVER] Client %d: kx_server_finish OCALL failed: 0x%x\n", client_id, status);
@@ -208,6 +272,98 @@ void *client_handler(void *arg)
     }
     LOG_PRINTF("[SERVER] Client %d: ECDH complete\n", client_id);
 
+    // ========== RECEIVER MODE: Loop for multiple requests ==========
+    LOG_PRINTF("[SERVER] Client %d: Entering receiver loop (send 'FETCH' for data, 'QUIT' to exit)\n", client_id);
+
+    while (1)
+    {
+        // Read command (1 byte: 'F' = FETCH, 'Q' = QUIT)
+        uint8_t command;
+        ret = mbedtls_ssl_read(ssl, &command, 1);
+        if (ret <= 0)
+        {
+            LOG_PRINTF("[SERVER] Client %d: Connection closed or read error\n", client_id);
+            break;
+        }
+
+        LOG_PRINTF("[SERVER] Client %d: Received command: %c\n", client_id, command);
+
+        if (command == 'Q')
+        {
+            LOG_PRINTF("[SERVER] Client %d: QUIT command received\n", client_id);
+            break;
+        }
+
+        if (command == 'F')
+        {
+            // FETCH: Call enclave to aggregate data from 2 servers
+            uint8_t aggregated_data[4096];
+            uint32_t aggregated_size = 0;
+
+            LOG_PRINTF("[SERVER] Client %d: Calling ecall_receiver_request...\n", client_id);
+            status = ecall_receiver_request(global_eid, &enclave_ret, client_id,
+                                            aggregated_data, &aggregated_size);
+
+            if (status != SGX_SUCCESS || enclave_ret != SGX_SUCCESS)
+            {
+                LOG_PRINTF("[SERVER] Client %d: ecall_receiver_request failed: 0x%x / 0x%x\n",
+                           client_id, status, enclave_ret);
+                break;
+            }
+
+            LOG_PRINTF("[SERVER] Client %d: Aggregated %u bytes\n", client_id, aggregated_size);
+
+            // Encrypt response
+            uint8_t response_iv[12];
+            uint8_t encrypted_response[4096];
+            uint8_t response_tag[16];
+
+            for (int i = 0; i < 12; i++)
+                response_iv[i] = rand() & 0xFF;
+
+            // For simplicity, convert to uint32_t array (pad if needed)
+            uint32_t response_as_uint32[(4096 + 3) / 4];
+            memset(response_as_uint32, 0, sizeof(response_as_uint32));
+            memcpy(response_as_uint32, aggregated_data, aggregated_size);
+            uint32_t response_count = (aggregated_size + 3) / 4;
+
+            status = kx_encrypt_server(global_eid, &enclave_ret, client_id,
+                                       response_as_uint32, response_count, response_iv,
+                                       encrypted_response, sizeof(encrypted_response), response_tag);
+
+            if (status != SGX_SUCCESS || enclave_ret != SGX_SUCCESS)
+            {
+                LOG_PRINTF("[SERVER] Client %d: Encryption failed: 0x%x / 0x%x\n",
+                           client_id, status, enclave_ret);
+                break;
+            }
+
+            // Send encrypted response: [IV:12][size:4][encrypted_data][tag:16]
+            ret = mbedtls_ssl_write(ssl, response_iv, 12);
+            if (ret != 12)
+                break;
+
+            ret = mbedtls_ssl_write(ssl, (uint8_t *)&aggregated_size, 4);
+            if (ret != 4)
+                break;
+
+            ret = mbedtls_ssl_write(ssl, encrypted_response, response_count * 4);
+            if (ret != (int)(response_count * 4))
+                break;
+
+            ret = mbedtls_ssl_write(ssl, response_tag, 16);
+            if (ret != 16)
+                break;
+
+            LOG_PRINTF("[SERVER] Client %d: Sent encrypted response (%u bytes actual data)\n",
+                       client_id, aggregated_size);
+        }
+    }
+
+    LOG_PRINTF("[SERVER] Client %d: Exiting receiver loop\n", client_id);
+    goto cleanup;
+
+    // ========== OLD PSI CODE (NOT USED IN RECEIVER MODE) ==========
     // Receive encrypted data [IV:12][size:4][blob][tag:16]
     LOG_PRINTF("[SERVER] Client %d: Waiting for IV...\n", client_id);
     ret = mbedtls_ssl_read(ssl, iv, 12);

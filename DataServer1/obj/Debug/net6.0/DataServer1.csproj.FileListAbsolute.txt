@@ -1,0 +1,15 @@
+/home/marcel/sgx_lab/examples/PSI_SGX/DataServer1/bin/Debug/net6.0/DataServer1
+/home/marcel/sgx_lab/examples/PSI_SGX/DataServer1/bin/Debug/net6.0/DataServer1.deps.json
+/home/marcel/sgx_lab/examples/PSI_SGX/DataServer1/bin/Debug/net6.0/DataServer1.runtimeconfig.json
+/home/marcel/sgx_lab/examples/PSI_SGX/DataServer1/bin/Debug/net6.0/DataServer1.dll
+/home/marcel/sgx_lab/examples/PSI_SGX/DataServer1/bin/Debug/net6.0/DataServer1.pdb
+/home/marcel/sgx_lab/examples/PSI_SGX/DataServer1/obj/Debug/net6.0/DataServer1.GeneratedMSBuildEditorConfig.editorconfig
+/home/marcel/sgx_lab/examples/PSI_SGX/DataServer1/obj/Debug/net6.0/DataServer1.AssemblyInfoInputs.cache
+/home/marcel/sgx_lab/examples/PSI_SGX/DataServer1/obj/Debug/net6.0/DataServer1.AssemblyInfo.cs
+/home/marcel/sgx_lab/examples/PSI_SGX/DataServer1/obj/Debug/net6.0/DataServer1.csproj.CoreCompileInputs.cache
+/home/marcel/sgx_lab/examples/PSI_SGX/DataServer1/obj/Debug/net6.0/DataServer1.sourcelink.json
+/home/marcel/sgx_lab/examples/PSI_SGX/DataServer1/obj/Debug/net6.0/DataServer1.dll
+/home/marcel/sgx_lab/examples/PSI_SGX/DataServer1/obj/Debug/net6.0/refint/DataServer1.dll
+/home/marcel/sgx_lab/examples/PSI_SGX/DataServer1/obj/Debug/net6.0/DataServer1.pdb
+/home/marcel/sgx_lab/examples/PSI_SGX/DataServer1/obj/Debug/net6.0/DataServer1.genruntimeconfig.cache
+/home/marcel/sgx_lab/examples/PSI_SGX/DataServer1/obj/Debug/net6.0/ref/DataServer1.dll

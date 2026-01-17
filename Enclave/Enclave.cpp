@@ -253,9 +253,9 @@ sgx_status_t kx_server_init(uint32_t client_id, uint8_t *server_pubkey)
 }
 
 /* KX: zakonczenie po stronie serwera - policz sekret DH i wyprowadz AES-128 */
-sgx_status_t kx_server_finish(uint32_t client_id, const uint8_t *client_pubkey, sgx_status_t *enclave_ret)
+sgx_status_t kx_server_finish(uint32_t client_id, const uint8_t *client_pubkey)
 {
-    if (client_id < 1 || client_id > 2 || !client_pubkey || !enclave_ret)
+    if (client_id < 1 || client_id > 2 || !client_pubkey)
         return SGX_ERROR_INVALID_PARAMETER;
     uint32_t idx = client_id - 1;
     sgx_ec256_public_t peer{};
@@ -265,8 +265,7 @@ sgx_status_t kx_server_finish(uint32_t client_id, const uint8_t *client_pubkey, 
     sgx_status_t ret = sgx_ecc256_compute_shared_dhkey(&g_srv_priv[idx], &peer, &shared, g_ecc_ctx[idx]);
     if (ret != SGX_SUCCESS)
     {
-        *enclave_ret = ret;
-        return SGX_SUCCESS;
+        return ret;
     }
 
     // Log shared secret for debugging
@@ -282,8 +281,7 @@ sgx_status_t kx_server_finish(uint32_t client_id, const uint8_t *client_pubkey, 
     ret = sgx_sha256_msg((const uint8_t *)&shared, sizeof(shared), &hash);
     if (ret != SGX_SUCCESS)
     {
-        *enclave_ret = ret;
-        return SGX_SUCCESS;
+        return ret;
     }
 
     // Log derived key for debugging
@@ -296,7 +294,6 @@ sgx_status_t kx_server_finish(uint32_t client_id, const uint8_t *client_pubkey, 
 
     memcpy(&g_kx_keys[idx], hash, 16);
     g_kx_ready[idx] = 1;
-    *enclave_ret = SGX_SUCCESS;
     return SGX_SUCCESS;
 }
 
@@ -505,5 +502,69 @@ sgx_status_t ecall_echo(uint32_t client_id,
 
     printf("[ENCLAVE] Echo: client %u sent %u bytes, returned %u bytes\n",
            client_id, input_size, input_size);
+    return SGX_SUCCESS;
+}
+
+/* Receiver request: fetch data from 2 external servers and aggregate */
+sgx_status_t ecall_receiver_request(uint32_t client_id,
+                                    uint8_t *response_data,
+                                    uint32_t *response_size)
+{
+    printf("[ENCLAVE] Receiver request from client %u\n", client_id);
+
+    uint8_t buffer1[2048] = {0};
+    uint8_t buffer2[2048] = {0};
+    uint32_t size1 = 0, size2 = 0;
+    int ret;
+
+    // Fetch data from server 1
+    printf("[ENCLAVE] Calling OCALL to fetch from server 1...\n");
+    sgx_status_t status = ocall_fetch_from_server(&ret, 1, buffer1, sizeof(buffer1), &size1);
+    if (status != SGX_SUCCESS || ret != 0)
+    {
+        printf("[ENCLAVE] Failed to fetch from server 1: ocall=0x%x, ret=%d\n", status, ret);
+        return SGX_ERROR_UNEXPECTED;
+    }
+    printf("[ENCLAVE] Received %u bytes from server 1\n", size1);
+
+    // Fetch data from server 2
+    printf("[ENCLAVE] Calling OCALL to fetch from server 2...\n");
+    status = ocall_fetch_from_server(&ret, 2, buffer2, sizeof(buffer2), &size2);
+    if (status != SGX_SUCCESS || ret != 0)
+    {
+        printf("[ENCLAVE] Failed to fetch from server 2: ocall=0x%x, ret=%d\n", status, ret);
+        return SGX_ERROR_UNEXPECTED;
+    }
+    printf("[ENCLAVE] Received %u bytes from server 2\n", size2);
+
+    // Aggregate: concatenate both responses with separator
+    uint32_t offset = 0;
+
+    // Add server 1 data
+    if (size1 > 0 && offset + size1 < 4096)
+    {
+        memcpy(response_data + offset, buffer1, size1);
+        offset += size1;
+    }
+
+    // Add separator
+    const char *separator = " + ";
+    uint32_t sep_len = strlen(separator);
+    if (offset + sep_len < 4096)
+    {
+        memcpy(response_data + offset, separator, sep_len);
+        offset += sep_len;
+    }
+
+    // Add server 2 data
+    if (size2 > 0 && offset + size2 < 4096)
+    {
+        memcpy(response_data + offset, buffer2, size2);
+        offset += size2;
+    }
+
+    *response_size = offset;
+    printf("[ENCLAVE] Aggregated response: %u bytes total\n", offset);
+
     return SGX_SUCCESS;
 }
